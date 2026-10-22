@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LuchaMania | Secure Admin Preview</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0c0b10;color:#f5f0ef;font:16px system-ui,sans-serif}main{max-width:920px;padding:30px 20px;margin:auto}h1{color:#ff5454}a{color:#ffc27d}section{background:#191820;border:1px solid #36313b;padding:18px;border-radius:14px;margin:18px 0}input,textarea,select,button{font:inherit;padding:11px;border-radius:8px}input,textarea,select{background:#0b0b10;border:1px solid #5a515e;color:white;width:100%;margin:6px 0 12px}button{background:#ed424c;color:white;border:0;cursor:pointer}button:disabled{opacity:.5}label{display:block}small,.muted{color:#bdb4be}li{padding:8px 0;border-bottom:1px solid #302b36}#status{white-space:pre-wrap}
+</style></head><body><main>
+<p><a href="./">← Back to LuchaMania</a></p><h1>LUCHAMANIA · Admin</h1>
+<p class="muted">Secure Supabase-based management preview. This page does not modify the site's browser-local V1 records.</p>
+<section><h2>Sign in</h2><p id="status" role="status">Checking configuration…</p>
+<div id="login"><label>Email<input id="email" type="email" autocomplete="username"></label><label>Password<input id="password" type="password" autocomplete="current-password"></label><button id="signin">Sign in</button></div>
+<button id="signout" hidden>Sign out</button></section>
+<section id="editor" hidden><h2>Add a database record</h2>
+<label>Collection<select id="collection"><option value="wrestlers">Wrestlers</option><option value="events">Events</option><option value="articles">News articles</option></select></label>
+<form id="recordForm"><div id="fields"></div><button type="submit">Save record</button></form>
+<h3>Most recent records</h3><ul id="items"></ul></section>
+</main>
+<script type="module">
+import {createClient} from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+// These are PUBLIC connection identifiers, NOT private passwords or service-role keys.
+const URL='PASTE_SUPABASE_URL', KEY='PASTE_SUPABASE_PUBLISHABLE_KEY';
+const status=document.querySelector('#status'),login=document.querySelector('#login'),editor=document.querySelector('#editor'),signout=document.querySelector('#signout');
+const specs={
+ wrestlers:[['name','Name','text',true],['faction','Faction','text',false],['bio','Biography','text',false]],
+ events:[['name','Event name','text',true],['event_date','Date','date',true],['brand','Brand','text',false],['description','Description','text',false]],
+ articles:[['headline','Headline','text',true],['category','Category','text',false],['body','Article text','text',false]]
+};
+const configured=URL.startsWith('https://')&&!URL.includes('PASTE_')&&!KEY.includes('PASTE_');
+const client=configured?createClient(URL,KEY):null;
+const $=s=>document.querySelector(s);
+const say=t=>status.textContent=t;
+const collection=$('#collection');
+function fields(){const root=$('#fields');root.replaceChildren();for(const [key,label,type,required] of specs[collection.value]){let wrap=document.createElement('label');wrap.textContent=label;let input=(key==='bio'||key==='body'||key==='description')?document.createElement('textarea'):document.createElement('input');input.name=key;if(input.tagName==='INPUT')input.type=type;input.required=required;wrap.append(input);root.append(wrap)}}
+async function refresh(){const {data,error}=await client.from(collection.value).select('*').order('created_at' in {}?'created_at':'id',{ascending:false}).limit(30);const root=$('#items');root.replaceChildren();if(error){say(error.message);return;}for(const record of data){const li=document.createElement('li');li.textContent=record.name||record.headline||record.id;const del=document.createElement('button');del.textContent='Delete';del.style.marginLeft='12px';del.onclick=async()=>{if(!confirm('Delete this record?'))return;const out=await client.from(collection.value).delete().eq('id',record.id);if(out.error)say(out.error.message);else await refresh()};li.append(del);root.append(li)}}
+async function state(){if(!configured){say('Database not configured. Follow DATABASE_SETUP.md before signing in.');$('#signin').disabled=true;return;}const {data:{user}}=await client.auth.getUser();if(!user){login.hidden=false;editor.hidden=true;signout.hidden=true;say('Sign in with your Supabase account.');return;}const {data:authorized,error}=await client.from('admin_users').select('user_id').eq('user_id',user.id).maybeSingle();if(error||!authorized){editor.hidden=true;login.hidden=true;signout.hidden=false;say('Signed in, but this account is not authorized as an administrator.');return;}login.hidden=true;signout.hidden=false;editor.hidden=false;say('Authorized administrator. Changes are saved to Supabase.');fields();await refresh();}
+$('#signin').onclick=async()=>{if(!client)return;const {error}=await client.auth.signInWithPassword({email:$('#email').value,password:$('#password').value});if(error)say(error.message);else{ $('#password').value='';await state();}};
+signout.onclick=async()=>{await client.auth.signOut();await state()};
+collection.onchange=()=>{fields();refresh()};
+$('#recordForm').onsubmit=async e=>{e.preventDefault();const input=new FormData(e.currentTarget),payload={};for(const [key] of specs[collection.value])payload[key]=String(input.get(key)||'').trim();if(collection.value==='articles')payload.published=false;const {error}=await client.from(collection.value).insert(payload);if(error)say(error.message);else{e.currentTarget.reset();say('Record saved.');await refresh()}};
+state();
+</script></body></html>
